@@ -77,11 +77,13 @@ fn handleRequest(request: *std.http.Server.Request) !void {
         // Create additional headers
         const headers = [_]std.http.Header{
             .{ .name = "Content-Type", .value = "text/plain" },
+
+            // NOTE: Zig's std.http.Server.Request.respond function automatically adds a content-length header
+            // So this is redundant, but I'm leaving it here for demonstration purposes
             .{ .name = "Echo-Length", .value = echo_len_str },
         };
 
         try request.respond(echo, .{
-            // NOTE: Zig's std.http.Server.Request.respond function automatically adds a content-length header
             .status = .ok,
             .extra_headers = &headers,
         });
