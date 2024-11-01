@@ -57,7 +57,7 @@ fn startServer(server: *std.net.Server) !void {
 fn handleRequest(request: *std.http.Server.Request) !void {
     std.debug.print("Handling request for {s}\n", .{request.head.target});
 
-    if (std.mem.eql(u8, request.head.target, "/")) {
+    if (std.mem.eql(u8, request.head.target, "/") and request.head.method == .GET) {
         try request.respond("OK\n", .{ .status = .ok });
     } else {
         try request.respond("NOT FOUND\n", .{ .status = .not_found });
