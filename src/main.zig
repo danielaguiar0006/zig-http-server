@@ -69,7 +69,7 @@ fn handleRequest(request: *std.http.Server.Request) !void {
         try request.respond("OK\n", .{ .status = .ok });
     }
     // Echo back the request body, with a 200 status code and two response headers
-    else if (request.head.target.len > 6 and std.mem.eql(u8, request.head.target[0..6], "/echo/")) {
+    else if (std.mem.startsWith(u8, request.head.target, "/echo/")) {
         // Get the what was received in the request body
         const echo = request.head.target[6..];
         var echo_len_buffer: [16]u8 = undefined;
@@ -90,7 +90,7 @@ fn handleRequest(request: *std.http.Server.Request) !void {
         });
     }
     // Respond with the "User-Agent" header value or a "400 Bad Request" if not found
-    else if (request.head.target.len == 11 and std.mem.eql(u8, request.head.target[0..11], "/user-agent")) {
+    else if (std.mem.startsWith(u8, request.head.target, "/user-agent")) {
         var user_agent_header: ?std.http.Header = null;
 
         // Iterate over the request headers to find the "User-Agent" header
