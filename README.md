@@ -6,6 +6,9 @@ A simple HTTP/1.1 server written in Zig. This server listens on `localhost:9090`
 - **GET /echo/<your string>**: Echoes back the specified string provided in the URL, along with custom headers:
   - `Content-Type: text/plain`
   - `Echo-Length: <length of echoed string>`
+- **GET /user-agent with a User-Agent header**: Returns the value of the received User-Agent header, along with custom headers:
+  - `Content-Type: text/plain`
+  - `Content-Length: <length of User-Agent header value>`
 - **Error Handling**: Responds with appropriate HTTP status codes:
   - `404 Not Found` for undefined endpoints.
   - `405 Method Not Allowed` for unsupported request methods.

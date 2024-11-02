@@ -1,5 +1,6 @@
 //! A simple HTTP/1.1 server in Zig.
 //! This program echoes back the request body when there is a GET request for: "/echo/<your string>".
+//! It also responds to the "/user-agent" endpoint with the recieved User-Agent header value or a "400 Bad Request" if not found.
 
 const std = @import("std");
 
@@ -75,7 +76,7 @@ fn handleRequest(request: *std.http.Server.Request) !void {
         const echo_len_str = try std.fmt.bufPrint(&echo_len_buffer, "{d}", .{echo.len});
 
         // Create additional headers
-        const headers = [_]std.http.Header{
+        const extra_headers = [_]std.http.Header{
             .{ .name = "Content-Type", .value = "text/plain" },
 
             // NOTE: Zig's std.http.Server.Request.respond function automatically adds a content-length header
@@ -85,7 +86,45 @@ fn handleRequest(request: *std.http.Server.Request) !void {
 
         try request.respond(echo, .{
             .status = .ok,
-            .extra_headers = &headers,
+            .extra_headers = &extra_headers,
+        });
+    }
+    // Respond with the "User-Agent" header value or a "400 Bad Request" if not found
+    else if (request.head.target.len == 11 and std.mem.eql(u8, request.head.target[0..11], "/user-agent")) {
+        var user_agent_header: ?std.http.Header = null;
+
+        // Iterate over the request headers to find the "User-Agent" header
+        var request_headers_iter = request.iterateHeaders();
+        while (request_headers_iter.next()) |header| {
+            if (std.mem.eql(u8, header.name, "User-Agent")) {
+                user_agent_header = header;
+                break;
+            }
+        }
+
+        // Respond with a "400 Bad Request" if the "User-Agent" header is not found
+        if (user_agent_header == null) {
+            try request.respond("No User-Agent header provided\n", .{ .status = .bad_request });
+            return;
+        }
+
+        // Get the value and length of the "User-Agent" header
+        const user_agent = user_agent_header.?.value;
+        var user_agent_len_buffer: [16]u8 = undefined;
+        const user_agent_len_str = try std.fmt.bufPrint(&user_agent_len_buffer, "{d}", .{user_agent.len});
+
+        // Create additional headers
+        const extra_headers = [_]std.http.Header{
+            .{ .name = "Content-Type", .value = "text/plain" },
+
+            // NOTE: Zig's std.http.Server.Request.respond function automatically adds a content-length header
+            // So this is redundant, but I'm leaving it here for demonstration purposes
+            .{ .name = "Content-Length", .value = user_agent_len_str },
+        };
+
+        try request.respond(user_agent, .{
+            .status = .ok,
+            .extra_headers = &extra_headers,
         });
     } else { // Respond with "NOT FOUND" and a 404 status code for any other request
         try request.respond("NOT FOUND\n", .{ .status = .not_found });
