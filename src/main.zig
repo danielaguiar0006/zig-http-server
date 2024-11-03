@@ -1,4 +1,4 @@
-//! A simple HTTP/1.1 server in Zig.
+//! A simple HTTP/1.1 server in Zig that now supports concurrent connections.
 //! This program echoes back the request body when there is a GET request for: "/echo/<your string>".
 //! It also responds to the "/user-agent" endpoint with the recieved User-Agent header value or a "400 Bad Request" if not found.
 
@@ -31,27 +31,30 @@ fn startServer(server: *std.net.Server) !void {
             std.debug.print("Connection to client interrupted: {}\n", .{err});
             continue;
         };
-        defer connection.stream.close();
 
-        // This is how you can raw-dog write to the connection stream
-        //try connection.stream.writeAll("HTTP/1.1 200 OK\r\n\r\n");
-
-        var read_buffer: [1024]u8 = undefined;
-        var http_server = std.http.Server.init(connection, &read_buffer);
-
-        var request = http_server.receiveHead() catch |err| {
-            std.debug.print("Error receiving request: {}\n", .{err});
-            try connection.stream.writeAll("HTTP/1.1 400 Bad Request\r\n\r\n");
-            connection.stream.close();
-            continue;
-        };
-        handleRequest(&request) catch |err| {
-            std.debug.print("Error handling request: {}\n", .{err});
-            try connection.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n");
-            connection.stream.close();
-            continue;
-        };
+        // Spawn a new thread to handle multiple connections
+        var thread = try std.Thread.spawn(.{}, handleConnection, .{&connection});
+        thread.detach();
     }
+}
+
+fn handleConnection(connection: *std.net.Server.Connection) !void {
+    var read_buffer: [1024]u8 = undefined;
+    var http_server = std.http.Server.init(connection.*, &read_buffer);
+
+    var request = http_server.receiveHead() catch |err| {
+        std.debug.print("Error receiving request: {}\n", .{err});
+        // If I'm not able to write to the connection stream, I assume the connection is already closed and I return early
+        connection.stream.writeAll("HTTP/1.1 400 Bad Request\r\n\r\n") catch return;
+        connection.stream.close();
+        return;
+    };
+    handleRequest(&request) catch |err| {
+        std.debug.print("Error handling request: {}\n", .{err});
+        connection.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n") catch return;
+    };
+
+    connection.stream.close();
 }
 
 /// Handles a request and sends a response back to the client.

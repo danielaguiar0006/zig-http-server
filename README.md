@@ -2,6 +2,7 @@
 
 A simple HTTP/1.1 server written in Zig. This server listens on `localhost:9090` and handles basic HTTP requests with minimal functionality:
 
+- **Supports concurrent connections.**
 - **GET /**: Returns a plain "OK" response.
 - **GET /echo/<your string>**: Echoes back the specified string provided in the URL, along with custom headers:
   - `Content-Type: text/plain`
