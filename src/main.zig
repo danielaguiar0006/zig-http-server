@@ -1,4 +1,4 @@
-//! A simple HTTP/1.1 server in Zig that now supports concurrent connections.
+//! A simple HTTP/1.1 server in Zig that now supports concurrent connections through a thread pool.
 //! This program echoes back the request body when there is a GET request for: "/echo/<your string>".
 //! It also responds to the "/user-agent" endpoint with the recieved User-Agent header value or a "400 Bad Request" if not found.
 //! Additionally, it serves files from the specified directory when there is a GET request for: "/files/<file path>".
@@ -27,12 +27,27 @@ pub fn main() !void {
     };
     defer server.deinit();
 
-    try startServer(&server);
+    startServer(&server);
 }
 
-/// Starts the HTTP server and accepts incoming connections.
-fn startServer(server: *std.net.Server) !void {
+/// Starts the server and handles incoming connections using a thread pool.
+///
+/// This function initializes a thread-safe allocator and a thread pool with 4 worker threads.
+/// It then enters an infinite loop to accept incoming connections. Each connection is handled
+/// by spawning a new task in the thread pool. If an error occurs while spawning a thread, an
+/// error message is sent to the client and the connection is closed.
+///
+/// @param server The server instance to start and accept connections from.
+fn startServer(server: *std.net.Server) void {
     std.debug.print("Starting server on port {}\n", .{server.listen_address.getPort()});
+
+    // Ensure the use of a thread-safe allocator
+    var thread_allocator: std.heap.ThreadSafeAllocator = .{ .child_allocator = std.heap.page_allocator };
+
+    // Initialize the thread pool with 4 worker threads
+    var threadpool: std.Thread.Pool = undefined;
+    threadpool.init(.{ .allocator = thread_allocator.allocator(), .n_jobs = 4 }) catch unreachable;
+    defer threadpool.deinit();
 
     while (true) {
         var connection = server.accept() catch |err| {
@@ -40,9 +55,11 @@ fn startServer(server: *std.net.Server) !void {
             continue;
         };
 
-        // Spawn a new thread to handle multiple connections
-        var thread = try std.Thread.spawn(.{}, handleConnection, .{&connection});
-        thread.detach();
+        threadpool.spawn(handleConnection, .{&connection}) catch |err| {
+            std.debug.print("Error spawning thread: {}\n", .{err});
+            connection.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n") catch return;
+            connection.stream.close();
+        };
     }
 }
 
@@ -55,7 +72,7 @@ fn startServer(server: *std.net.Server) !void {
 ///
 /// @param connection A pointer to the server connection to handle.
 /// @return An error if the connection handling fails, otherwise void.
-fn handleConnection(connection: *std.net.Server.Connection) !void {
+fn handleConnection(connection: *std.net.Server.Connection) void {
     var read_buffer: [1024]u8 = undefined;
     var http_server = std.http.Server.init(connection.*, &read_buffer);
 
