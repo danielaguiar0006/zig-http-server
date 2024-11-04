@@ -55,7 +55,7 @@ fn startServer(server: *std.net.Server) void {
             continue;
         };
 
-        threadpool.spawn(handleConnection, .{&connection}) catch |err| {
+        threadpool.spawn(handleConnection, .{connection}) catch |err| {
             std.debug.print("Error spawning thread: {}\n", .{err});
             connection.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n") catch return;
             connection.stream.close();
@@ -72,9 +72,9 @@ fn startServer(server: *std.net.Server) void {
 ///
 /// @param connection A pointer to the server connection to handle.
 /// @return An error if the connection handling fails, otherwise void.
-fn handleConnection(connection: *std.net.Server.Connection) void {
+fn handleConnection(connection: std.net.Server.Connection) void {
     var read_buffer: [1024]u8 = undefined;
-    var http_server = std.http.Server.init(connection.*, &read_buffer);
+    var http_server = std.http.Server.init(connection, &read_buffer);
 
     var request = http_server.receiveHead() catch |err| {
         std.debug.print("Error receiving request: {}\n", .{err});
