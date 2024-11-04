@@ -1,6 +1,7 @@
 # Zig HTTP Server
 
 A simple HTTP/1.1 server written in Zig. This server listens on `localhost:9090` and handles basic HTTP requests with minimal functionality:
+*Inpsired by [CodeCrafters: Build your own HTTP server](https://app.codecrafters.io/courses/http-server/overview)*
 
 - **Supports concurrent connections through a thread pool.**
 - **GET /**: Returns a plain "OK" response.
