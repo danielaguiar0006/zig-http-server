@@ -1,10 +1,12 @@
 //! A simple HTTP/1.1 server in Zig that now supports concurrent connections through a thread pool.
 //! This program echoes back the request body when there is a GET request for: "/echo/<your string>".
 //! It also responds to the "/user-agent" endpoint with the recieved User-Agent header value or a "400 Bad Request" if not found.
-//! Additionally, it serves files from the specified directory when there is a GET request for: "/files/<file path>".
+//! Serves files from the specified directory when there is a GET request for: "/files/<file path>".
+//! Additionally Create files from the specified directory when there is a POST request for: "/files/<file path>".
 
 const std = @import("std");
 
+const allocator = std.heap.page_allocator;
 const CommandLineArgs = struct {
     directory: ?[]const u8,
 };
@@ -42,7 +44,7 @@ fn startServer(server: *std.net.Server) void {
     std.debug.print("Starting server on port {}\n", .{server.listen_address.getPort()});
 
     // Ensure the use of a thread-safe allocator
-    var thread_allocator: std.heap.ThreadSafeAllocator = .{ .child_allocator = std.heap.page_allocator };
+    var thread_allocator: std.heap.ThreadSafeAllocator = .{ .child_allocator = allocator };
 
     // Initialize the thread pool with 4 worker threads
     var threadpool: std.Thread.Pool = undefined;
@@ -97,17 +99,17 @@ pub fn handleRequest(request: *std.http.Server.Request) !void {
     std.debug.print("Handling request for {s}\n", .{request.head.target});
 
     // Respond with "NOT GET" and a 404 status code when the request is not a GET request
-    if (request.head.method != .GET) {
-        try request.respond("METHOD NOT ALLOWED\n", .{ .status = .method_not_allowed });
-        return;
-    }
+    // if (request.head.method != .GET) {
+    //     try request.respond("METHOD NOT ALLOWED\n", .{ .status = .method_not_allowed });
+    //     return;
+    // }
 
     // Respond with "OK" and a 200 status code when the request is for the root path ("/")
     if (std.mem.eql(u8, request.head.target, "/")) {
         try request.respond("OK\n", .{ .status = .ok });
     }
     // Echo back the request body, with a 200 status code and two response headers
-    else if (std.mem.startsWith(u8, request.head.target, "/echo/")) {
+    else if (std.mem.startsWith(u8, request.head.target, "/echo/") and request.head.method == .GET) {
         // Get the what was received in the request body
         const echo = request.head.target[6..];
         var echo_len_buffer: [16]u8 = undefined;
@@ -128,7 +130,7 @@ pub fn handleRequest(request: *std.http.Server.Request) !void {
         });
     }
     // Respond with the "User-Agent" header value or a "400 Bad Request" if not found
-    else if (std.mem.startsWith(u8, request.head.target, "/user-agent")) {
+    else if (std.mem.startsWith(u8, request.head.target, "/user-agent") and request.head.method == .GET) {
         var user_agent_header: ?std.http.Header = null;
 
         // Iterate over the request headers to find the "User-Agent" header
@@ -168,7 +170,7 @@ pub fn handleRequest(request: *std.http.Server.Request) !void {
     // Respond with the contents of the specified file, its length, and a 200 status code
     // NOTE: A command-line argument is required to specify the directory containing the
     // files to be served.
-    else if (std.mem.startsWith(u8, request.head.target, "/files/")) {
+    else if (std.mem.startsWith(u8, request.head.target, "/files/") and request.head.method == .GET) {
         if (program_args.directory == null) {
             std.debug.print("Error: No directory specified for --directory argument\n", .{});
             try request.respond("ERROR: Unable to serve files\n", .{ .status = .internal_server_error });
@@ -177,9 +179,6 @@ pub fn handleRequest(request: *std.http.Server.Request) !void {
             try request.respond("ERROR: Invalid file path\n", .{ .status = .bad_request });
             return;
         }
-
-        // Using allocator to make sure enough memory is allocated for the file contents (which may be large)
-        const allocator = std.heap.page_allocator;
 
         const directory = program_args.directory.?;
         const absolute_file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory, request.head.target[7..] });
@@ -207,6 +206,50 @@ pub fn handleRequest(request: *std.http.Server.Request) !void {
 
         try request.respond(file_contents, .{
             .status = .ok,
+            .extra_headers = &extra_headers,
+        });
+    }
+    // POST method of the /files/{filename} endpoint, which accepts text from the client and creates a new file with that text.
+    else if (std.mem.startsWith(u8, request.head.target, "/files/") and request.head.method == .POST) {
+        if (program_args.directory == null) {
+            std.debug.print("Error: No directory specified for --directory argument\n", .{});
+            try request.respond("ERROR: Unable to serve files\n", .{ .status = .internal_server_error });
+            return;
+        } else if (request.head.target.len <= 7) {
+            try request.respond("ERROR: Invalid file path\n", .{ .status = .bad_request });
+            return;
+        }
+
+        const directory = program_args.directory.?;
+        const absolute_file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory, request.head.target[7..] });
+        defer allocator.free(absolute_file_path);
+
+        // Create the file
+        var file = std.fs.createFileAbsolute(absolute_file_path, .{}) catch |err| {
+            std.debug.print("Error creating file: {s}\ndue to: {}\n", .{ absolute_file_path, err });
+            try request.respond("ERROR: Unable to create file.\n", .{ .status = .internal_server_error });
+            return;
+        };
+        defer file.close();
+
+        // Write the file contents
+        const file_contents_reader = try request.reader();
+        const file_contents = try file_contents_reader.readAllAlloc(allocator, std.math.maxInt(usize));
+        defer allocator.free(file_contents);
+        try file.writeAll(file_contents);
+
+        // Read the file contents and its length (as a string)
+        const file_contents_len_str = try std.fmt.allocPrint(allocator, "{d}", .{file_contents.len});
+        defer allocator.free(file_contents_len_str);
+
+        // Create additional headers
+        const extra_headers = [_]std.http.Header{
+            .{ .name = "Content-Type", .value = "application/octet-stream" },
+            .{ .name = "Content-Length", .value = file_contents_len_str },
+        };
+
+        try request.respond(file_contents, .{
+            .status = .created,
             .extra_headers = &extra_headers,
         });
     } else { // Respond with "NOT FOUND" and a 404 status code for any other request

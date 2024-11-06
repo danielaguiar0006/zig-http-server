@@ -12,6 +12,7 @@ A simple HTTP/1.1 server written in Zig. This server listens on `localhost:9090`
   - `Content-Type: text/plain`
   - `Content-Length: <length of User-Agent header value>`
 - **GET /files/<file path>**: Serves files from the specified directory based on the request target.
+- **POST /files/<file path>**: Creates files from the specified directory based on the request target.
 - **Error Handling**: Responds with appropriate HTTP status codes:
   - `404 Not Found` for undefined endpoints.
   - `405 Method Not Allowed` for unsupported request methods.
